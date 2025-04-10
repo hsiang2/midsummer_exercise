@@ -17,58 +17,41 @@ const verticesB = [
   {x: 365, y: 102}, {x: 365, y: 72}
 ];
 
-// function createPolygon(vertices, fill) {
-//   return new Konva.Line({
-//     points: vertices.flatMap(p => [p.x, p.y]),
-//     fill: fill,
-//     stroke: 'black',
-//     strokeWidth: 2,
-//     closed: true,
-// })}
-
 function createPolygon(vertices, fill, draggable = false) {
   return new Konva.Line({
     points: vertices.flatMap(p => [p.x, p.y]),
     fill: fill,
     stroke: 'black',
-    strokeWidth: 2,
+    strokeWidth: 1,
     closed: true,
     draggable: draggable
 })}
 
-// function createVertices(vertices) {
-//   return vertices.map(v => new Konva.Circle({
-//     x: v.x,
-//     y: v.y,
-//     radius: 3,
-//     fill: 'black',
-//   }))
-// }
+function createVertices(vertices, includeMidpoints = false) {
+  let points = [];
+
+  vertices.forEach((v, i) => {
+      points.push(new Konva.Circle({ x: v.x, y: v.y, radius: 3, fill: 'black' }));
+
+      if (includeMidpoints) {
+          let nextV = vertices[(i + 1) % vertices.length];
+          let mid = getMidpoint(v, nextV);
+          points.push(new Konva.Circle({ x: mid.x, y: mid.y, radius: 2, fill: 'black' }));
+      }
+  });
+
+  return points;
+}
 
 const polygonA = createPolygon(verticesA, 'cyan');
-const polygonB = createPolygon(verticesB, 'red', true);
-
 layer.add(polygonA);
+
+const dotsA = createVertices(verticesA, true);
+dotsA.forEach(dot => layer.add(dot));
+
+const polygonB = createPolygon(verticesB, 'red', true);
 layer.add(polygonB);
-// createVertices(verticesA).forEach(dot => layer.add(dot));
 
-// const groupB = new Konva.Group({
-//   draggable: true 
-// });
-
-// const polygonB = createPolygon(verticesB, 'red');
-// groupB.add(polygonB);
-
-// const dotsB = createVertices(verticesB);
-// dotsB.forEach(dot => groupB.add(dot));
-
-// add cursor styling
-// groupB.on('mouseover', () => {
-//     document.body.style.cursor = 'pointer';
-//   });
-// groupB.on('mouseout', () => {
-//   document.body.style.cursor = 'default';
-// });
 polygonB.on('mouseover', () => {
   document.body.style.cursor = 'pointer';
 });
@@ -76,25 +59,20 @@ polygonB.on('mouseout', () => {
 document.body.style.cursor = 'default';
 });
 
-// layer.add(groupB);
-
-
 polygonB.on('dragmove', () => {
   let pos = polygonB.getAbsolutePosition();
   let newVerticesB = verticesB.map(v => ({ x: v.x + pos.x, y: v.y + pos.y }));
 
-  let snapPos = checkSnap(newVerticesB);
-  console.log("pos", newVerticesB); 
-  console.log(snapPos);  // 查看返回的 snap 位置
-  if (snapPos) {
-    // polygonB.position(snapPos)
+  const { snapPos, vertexIndex } = checkSnap(newVerticesB);
+
+  if (snapPos !== null && vertexIndex !== null) {
     let offset = { 
-      x: snapPos.x - newVerticesB[0].x, // 計算第一個點應該移動多少
-      y: snapPos.y - newVerticesB[0].y
+      x: snapPos.x - newVerticesB[vertexIndex].x, 
+      y: snapPos.y - newVerticesB[vertexIndex].y
     };
 
     polygonB.position({ 
-      x: pos.x + offset.x, // 只移動 offset 差值
+      x: pos.x + offset.x,
       y: pos.y + offset.y
     });
   }
@@ -104,36 +82,46 @@ polygonB.on('dragmove', () => {
 
 function checkSnap(verticesB) {
   let snapStandards = { vertex: 20, midpoint: 15, line: 10 }
-  let closestSnap = null;
-  let closestDistance = Infinity;
-  
-  verticesB.forEach(vertexB => {
-    verticesA.forEach((vertexA, index) => {
-      let nextVertexA = verticesA[(index + 1) % verticesA.length]
-      
-      let distVertex = getDistance(vertexB, vertexA)
-      if (distVertex < snapStandards.vertex && distVertex < closestDistance) {
-        closestSnap = { x: vertexA.x, y: vertexA.y};
-        closestDistance = distVertex;
-      }
-
-      let midpoint = getMidpoint(vertexA, nextVertexA);
-      let distMid = getDistance(vertexB, midpoint);
-      if (distMid < snapStandards.midpoint && distMid < closestDistance) {
-        closestSnap = midpoint;
-        closestDistance = distMid;
-      }
-
-      let closestPointOnLine = getClosestPointOnLine(vertexB, vertexA, nextVertexA);
-      let distLine = getDistance(vertexB, closestPointOnLine);
-      if (distLine < snapStandards.line && distLine < closestDistance) {
-        closestSnap = closestPointOnLine;
-        closestDistance = distLine;
-      }
-    })
-  })
-
-  return closestSnap
+   // Check vertex
+   let best = { snapPos: null, vertexIndex: null, distance: Infinity };
+   verticesB.forEach((vertexB, iB) => {
+     verticesA.forEach((vertexA) => {
+       let d = getDistance(vertexB, vertexA);
+       if (d < snapStandards.vertex && d < best.distance) {
+         best = { snapPos: { x: vertexA.x, y: vertexA.y }, vertexIndex: iB, distance: d };
+       }
+     });
+   });
+   if (best.snapPos) return { snapPos: best.snapPos, vertexIndex: best.vertexIndex };
+ 
+   // Check midpoint
+   best = { snapPos: null, vertexIndex: null, distance: Infinity };
+   verticesB.forEach((vertexB, iB) => {
+     verticesA.forEach((vertexA, iA) => {
+       let nextVertexA = verticesA[(iA + 1) % verticesA.length];
+       let midpoint = getMidpoint(vertexA, nextVertexA);
+       let d = getDistance(vertexB, midpoint);
+       if (d < snapStandards.midpoint && d < best.distance) {
+         best = { snapPos: midpoint, vertexIndex: iB, distance: d };
+       }
+     });
+   });
+   if (best.snapPos) return { snapPos: best.snapPos, vertexIndex: best.vertexIndex };
+ 
+   // Check line
+   best = { snapPos: null, vertexIndex: null, distance: Infinity };
+   verticesB.forEach((vertexB, iB) => {
+     verticesA.forEach((vertexA, iA) => {
+       let nextVertexA = verticesA[(iA + 1) % verticesA.length];
+       let closestOnLine = getClosestPointOnLine(vertexB, vertexA, nextVertexA);
+       let d = getDistance(vertexB, closestOnLine);
+       if (d < snapStandards.line && d < best.distance) {
+         best = { snapPos: closestOnLine, vertexIndex: iB, distance: d };
+       }
+     });
+   });
+   
+   return { snapPos: best.snapPos, vertexIndex: best.vertexIndex };
 }
 
 function getDistance(p1, p2) {
